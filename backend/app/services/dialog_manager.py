@@ -1,0 +1,347 @@
+import re
+from datetime import datetime, date, timedelta
+from typing import Dict, Any, Optional, List
+from backend.app.models.event import (
+    EventType,
+    EventCreate,
+    EventUpdate,
+    EventItem,
+    EventFilter,
+    AssistantResponse,
+    AssistantAction,
+)
+from backend.app.database import (
+    db_create_event,
+    db_get_event,
+    db_update_event,
+    db_delete_event,
+    db_list_events,
+    db_find_conflicts,
+    db_search_fts,
+)
+from backend.app.services.nlu_parser import (
+    parse_russian_date,
+    parse_russian_time,
+)
+from backend.app.services.llm_client import parse_query_with_llm_or_fallback
+
+# In-memory session context storage
+SESSION_CONTEXT: Dict[str, Dict[str, Any]] = {}
+
+
+def get_session(session_id: str) -> Dict[str, Any]:
+    if session_id not in SESSION_CONTEXT:
+        SESSION_CONTEXT[session_id] = {
+            "last_event_id": None,
+            "pending_action": None,
+            "awaiting_field": None,
+            "draft_event": None,
+        }
+    return SESSION_CONTEXT[session_id]
+
+
+def format_russian_date_spoken(date_str: str) -> str:
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d").date()
+        today = date.today()
+        if dt == today:
+            return "сегодня"
+        elif dt == today + timedelta(days=1):
+            return "завтра"
+        elif dt == today + timedelta(days=2):
+            return "послезавтра"
+
+        months = [
+            "", "января", "февраля", "марта", "апреля", "мая", "июня",
+            "июля", "августа", "сентября", "октября", "ноября", "декабря"
+        ]
+        return f"{dt.day} {months[dt.month]}"
+    except Exception:
+        return date_str
+
+
+class DialogManager:
+    @staticmethod
+    async def process_user_message(message: str, session_id: str = "default") -> AssistantResponse:
+        session = get_session(session_id)
+        text = message.strip()
+
+        # 1. Check if user is responding to an awaiting clarification
+        if session.get("awaiting_field") == "time" and session.get("draft_event"):
+            extracted_time = parse_russian_time(text)
+            if extracted_time:
+                draft = session["draft_event"]
+                draft.time = extracted_time
+                session["awaiting_field"] = None
+                session["draft_event"] = None
+
+                # Check conflict for meetings
+                if draft.type == EventType.MEETING and draft.time:
+                    conflicts = db_find_conflicts(draft.date, draft.time)
+                    if conflicts:
+                        conflict_name = conflicts[0].title
+                        created = db_create_event(draft)
+                        session["last_event_id"] = created.id
+                        reply = (
+                            f"Встреча «{created.title}» добавлена на {format_russian_date_spoken(created.date)} в {created.time}. "
+                            f"Обратите внимание: в это же время у вас уже запланирована встреча «{conflict_name}»."
+                        )
+                        return AssistantResponse(
+                            reply_text=reply,
+                            voice_text=reply,
+                            affected_events=[created],
+                            action=AssistantAction(
+                                action_type="CREATE_WITH_CONFLICT",
+                                target_event_id=created.id,
+                                conflict_event_id=conflicts[0].id,
+                            ),
+                        )
+
+                created = db_create_event(draft)
+                session["last_event_id"] = created.id
+                time_str = f" в {created.time}" if created.time else ""
+                reply = f"Отлично! Добавил встречу «{created.title}» на {format_russian_date_spoken(created.date)}{time_str}."
+                return AssistantResponse(
+                    reply_text=reply,
+                    voice_text=reply,
+                    affected_events=[created],
+                    action=AssistantAction(action_type="CREATE", target_event_id=created.id),
+                )
+            else:
+                return AssistantResponse(
+                    reply_text="Пожалуйста, уточните время в формате часов и минут, например: «в 15:00» или «в 10 утра».",
+                    voice_text="Пожалуйста, уточните время встречи.",
+                    requires_clarification=True,
+                )
+
+        # 2. Parse NLU / LLM intent
+        parsed = await parse_query_with_llm_or_fallback(text)
+        intent = parsed.get("intent", "UNKNOWN")
+
+        # 3. Handle INTENT: COMPLETE_EVENT
+        if intent == "COMPLETE_EVENT":
+            query = parsed.get("query", "")
+            target_event = None
+            if query:
+                found = db_search_fts(query, limit=5)
+                if found:
+                    target_event = found[0]
+            elif session.get("last_event_id"):
+                target_event = db_get_event(session["last_event_id"])
+
+            if target_event:
+                updated = db_update_event(target_event.id, EventUpdate(is_completed=True))
+                session["last_event_id"] = updated.id
+                reply = f"Готово! Задача «{updated.title}» отмечена как выполненная."
+                return AssistantResponse(
+                    reply_text=reply,
+                    voice_text=reply,
+                    affected_events=[updated],
+                    action=AssistantAction(action_type="COMPLETE", target_event_id=updated.id),
+                )
+            return AssistantResponse(
+                reply_text="Не удалось найти задачу для отметки о выполнении. Уточните название.",
+                voice_text="Не нашел такую задачу. Какую задачу отметить выполненной?",
+            )
+
+        # 4. Handle INTENT: DELETE_EVENT
+        if intent == "DELETE_EVENT":
+            query = parsed.get("query", "")
+            target_event = None
+            if query:
+                found = db_search_fts(query, limit=5)
+                if found:
+                    target_event = found[0]
+            elif session.get("last_event_id"):
+                target_event = db_get_event(session["last_event_id"])
+
+            if target_event:
+                db_delete_event(target_event.id)
+                session["last_event_id"] = None
+                reply = f"Запись «{target_event.title}» успешно удалена."
+                return AssistantResponse(
+                    reply_text=reply,
+                    voice_text=reply,
+                    action=AssistantAction(action_type="DELETE", target_event_id=target_event.id),
+                )
+            return AssistantResponse(
+                reply_text="Не нашел запись для удаления. Уточните, какую именно задачу или встречу удалить.",
+                voice_text="Какую задачу или встречу удалить?",
+            )
+
+        # 5. Handle INTENT: RESCHEDULE_EVENT
+        if intent == "RESCHEDULE_EVENT":
+            new_date = parsed.get("date")
+            new_time = parsed.get("time")
+            last_id = session.get("last_event_id")
+            if last_id:
+                ev = db_get_event(last_id)
+                if ev:
+                    update_kwargs = {}
+                    if new_date:
+                        update_kwargs["date"] = new_date
+                    if new_time:
+                        update_kwargs["time"] = new_time
+                    updated = db_update_event(ev.id, EventUpdate(**update_kwargs))
+                    time_info = f" на {updated.time}" if updated.time else ""
+                    reply = f"Перенес «{updated.title}» на {format_russian_date_spoken(updated.date)}{time_info}."
+                    return AssistantResponse(
+                        reply_text=reply,
+                        voice_text=reply,
+                        affected_events=[updated],
+                        action=AssistantAction(action_type="UPDATE", target_event_id=updated.id),
+                    )
+            return AssistantResponse(
+                reply_text="Какую именно задачу или встречу вы хотите перенести?",
+                voice_text="Какое событие нужно перенести?",
+            )
+
+        # 6. Handle INTENT: SEARCH_EVENTS
+        if intent == "SEARCH_EVENTS":
+            query = parsed.get("query", "")
+            results = db_search_fts(query, limit=10)
+            if not results:
+                # Try simple query search in title
+                filters = EventFilter(query=query)
+                results = db_list_events(filters, limit=10)
+
+            if results:
+                lines = []
+                for r in results[:5]:
+                    t_str = f" в {r.time}" if r.time else ""
+                    lines.append(f"• {format_russian_date_spoken(r.date)}{t_str}: {r.title}")
+                session["last_event_id"] = results[0].id
+                reply = f"Нашел следующие записи по запросу «{query}»:\n" + "\n".join(lines)
+                voice = f"Нашел {len(results)} записей. Первая: {results[0].title} на {format_russian_date_spoken(results[0].date)}."
+                return AssistantResponse(
+                    reply_text=reply,
+                    voice_text=voice,
+                    affected_events=results,
+                    action=AssistantAction(action_type="SEARCH"),
+                )
+            else:
+                reply = f"По запросу «{query}» ничего не найдено."
+                return AssistantResponse(reply_text=reply, voice_text=reply)
+
+        # 7. Handle INTENT: LIST_EVENTS
+        if intent == "LIST_EVENTS":
+            target_date = parsed.get("date", date.today().isoformat())
+            is_week = parsed.get("is_week", False)
+            event_type = parsed.get("type")
+
+            if is_week:
+                today = date.today()
+                end_of_week = (today + timedelta(days=6 - today.weekday())).isoformat()
+                filters = EventFilter(start_date=today.isoformat(), end_date=end_of_week, type=event_type)
+                period_title = "на эту неделю"
+            else:
+                filters = EventFilter(start_date=target_date, end_date=target_date, type=event_type)
+                period_title = f"на {format_russian_date_spoken(target_date)}"
+
+            events = db_list_events(filters, limit=20)
+            if events:
+                lines = []
+                for e in events:
+                    t_str = f"{e.time} — " if e.time else ""
+                    type_icon = "📅" if e.type == EventType.MEETING else "✅"
+                    lines.append(f"{type_icon} {t_str}{e.title}")
+                reply = f"Ваши планы {period_title} ({len(events)}):\n" + "\n".join(lines)
+                voice = f"У вас {len(events)} событий {period_title}. Первое: {events[0].title}."
+                return AssistantResponse(
+                    reply_text=reply,
+                    voice_text=voice,
+                    affected_events=events,
+                    action=AssistantAction(action_type="LIST"),
+                )
+            else:
+                reply = f"На этот период ({period_title}) запланированных событий нет. Вы свободны!"
+                return AssistantResponse(reply_text=reply, voice_text=reply)
+
+        # 8. Handle INTENT: CREATE_EVENT
+        if intent == "CREATE_EVENT":
+            event_type = parsed.get("type", EventType.TASK)
+            title = parsed.get("title", text)
+            target_date = parsed.get("date") or date.today().isoformat()
+            target_time = parsed.get("time")
+            attendees = parsed.get("attendees")
+
+            # Check if this is a meeting without a specified time -> ask clarification!
+            if event_type == EventType.MEETING and not target_time:
+                draft = EventCreate(
+                    type=event_type,
+                    title=title,
+                    date=target_date,
+                    time=None,
+                    attendees=attendees,
+                )
+                session["draft_event"] = draft
+                session["awaiting_field"] = "time"
+                clarification = "На какое время поставить встречу?"
+                return AssistantResponse(
+                    reply_text=f"Встреча «{title}» на {format_russian_date_spoken(target_date)}. {clarification}",
+                    voice_text=clarification,
+                    requires_clarification=True,
+                    action=AssistantAction(
+                        action_type="CLARIFY",
+                        clarification_question=clarification,
+                    ),
+                )
+
+            # Check for conflict if meeting
+            if event_type == EventType.MEETING and target_time:
+                conflicts = db_find_conflicts(target_date, target_time)
+                new_event = db_create_event(
+                    EventCreate(
+                        type=event_type,
+                        title=title,
+                        date=target_date,
+                        time=target_time,
+                        attendees=attendees,
+                    )
+                )
+                session["last_event_id"] = new_event.id
+
+                if conflicts:
+                    conflict_name = conflicts[0].title
+                    reply = (
+                        f"Встреча «{new_event.title}» добавлена на {format_russian_date_spoken(new_event.date)} в {new_event.time}. "
+                        f"⚠️ Внимание: в это время уже есть встреча «{conflict_name}»!"
+                    )
+                    return AssistantResponse(
+                        reply_text=reply,
+                        voice_text=f"Встреча добавлена, но в это же время у вас уже запланирована встреча {conflict_name}.",
+                        affected_events=[new_event],
+                        action=AssistantAction(
+                            action_type="CREATE_WITH_CONFLICT",
+                            target_event_id=new_event.id,
+                            conflict_event_id=conflicts[0].id,
+                        ),
+                    )
+
+            # Standard create
+            created = db_create_event(
+                EventCreate(
+                    type=event_type,
+                    title=title,
+                    date=target_date,
+                    time=target_time,
+                    attendees=attendees,
+                )
+            )
+            session["last_event_id"] = created.id
+
+            type_name = "Встреча" if created.type == EventType.MEETING else ("Напоминание" if created.type == EventType.REMINDER else "Задача")
+            time_info = f" в {created.time}" if created.time else ""
+            reply = f"{type_name} «{created.title}» сохранена на {format_russian_date_spoken(created.date)}{time_info}."
+            return AssistantResponse(
+                reply_text=reply,
+                voice_text=reply,
+                affected_events=[created],
+                action=AssistantAction(action_type="CREATE", target_event_id=created.id),
+            )
+
+        # Fallback response
+        return AssistantResponse(
+            reply_text="Я могу создать задачу или встречу, найти события в расписании или отметить задачу выполненной. Что нужно сделать?",
+            voice_text="Чем я могу вам помочь?",
+        )
