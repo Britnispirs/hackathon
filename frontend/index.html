@@ -129,10 +129,16 @@
               <h2>Расписание</h2>
               <p class="agenda-subtitle">Список задач и встреч</p>
             </div>
-            <span class="events-count" id="eventsCount">0 записей</span>
+            <div class="agenda-header-right">
+              <div class="view-switch-tabs" id="viewSwitchTabs">
+                <button class="view-btn active" data-view="list">Список</button>
+                <button class="view-btn" data-view="calendar">Календарь</button>
+              </div>
+              <span class="events-count" id="eventsCount">0 записей</span>
+            </div>
           </div>
 
-          <div class="filters-bar">
+          <div class="filters-bar" id="agendaFiltersBar">
             <div class="filter-tabs" id="filterTabs">
               <button class="tab-btn active" data-filter="all">Все</button>
               <button class="tab-btn" data-filter="meeting">Встречи</button>
@@ -155,6 +161,39 @@
           <div class="events-loading">
             <div class="spinner"></div>
             <span>Загрузка...</span>
+          </div>
+        </div>
+
+        <div class="calendar-wrapper" id="calendarWrapper" style="display: none;">
+          <div class="calendar-nav">
+            <div class="cal-nav-left">
+              <button class="cal-nav-btn" id="prevMonthBtn" title="Предыдущий месяц">&larr;</button>
+              <span class="cal-month-title" id="calendarMonthTitle">Октябрь 2026</span>
+              <button class="cal-nav-btn" id="nextMonthBtn" title="Следующий месяц">&rarr;</button>
+            </div>
+            <button class="btn btn-secondary cal-today-btn" id="calendarTodayBtn">Сегодня</button>
+          </div>
+
+          <div class="calendar-grid-header">
+            <div>Пн</div>
+            <div>Вт</div>
+            <div>Ср</div>
+            <div>Чт</div>
+            <div>Пт</div>
+            <div>Сб</div>
+            <div>Вс</div>
+          </div>
+
+          <div class="calendar-days-grid" id="calendarDaysGrid"></div>
+
+          <div class="calendar-day-details">
+            <div class="cal-day-header">
+              <h3 id="calendarSelectedDateLabel">Планы на дату</h3>
+              <button class="btn btn-secondary btn-sm" id="calAddForDayBtn">+ Добавить</button>
+            </div>
+            <div class="cal-day-events" id="calendarDayEvents">
+              <div class="events-empty"><p>На этот день нет записей</p></div>
+            </div>
           </div>
         </div>
       </section>

@@ -1,9 +1,15 @@
 document.addEventListener('DOMContentLoaded', () => {
   let currentEvents = [];
   let currentFilter = 'all';
+  let currentView = 'list';
   let currentSearchQuery = '';
   let searchDebounceTimeout = null;
   let conflictCheckTimeout = null;
+
+  const now = new Date();
+  let calYear = now.getFullYear();
+  let calMonth = now.getMonth();
+  let selectedDateStr = now.toISOString().split('T')[0];
 
   let sessionId = sessionStorage.getItem('assistant_session_id');
   if (!sessionId) {
@@ -26,9 +32,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const eventsCount = document.getElementById('eventsCount');
   const filterTabs = document.getElementById('filterTabs');
+  const agendaFiltersBar = document.getElementById('agendaFiltersBar');
   const agendaSearchInput = document.getElementById('agendaSearchInput');
   const clearSearchBtn = document.getElementById('clearSearchBtn');
   const eventsList = document.getElementById('eventsList');
+  const viewSwitchTabs = document.getElementById('viewSwitchTabs');
+
+  const calendarWrapper = document.getElementById('calendarWrapper');
+  const calendarMonthTitle = document.getElementById('calendarMonthTitle');
+  const prevMonthBtn = document.getElementById('prevMonthBtn');
+  const nextMonthBtn = document.getElementById('nextMonthBtn');
+  const calendarTodayBtn = document.getElementById('calendarTodayBtn');
+  const calendarDaysGrid = document.getElementById('calendarDaysGrid');
+  const calendarSelectedDateLabel = document.getElementById('calendarSelectedDateLabel');
+  const calendarDayEvents = document.getElementById('calendarDayEvents');
+  const calAddForDayBtn = document.getElementById('calAddForDayBtn');
 
   const eventModal = document.getElementById('eventModal');
   const modalTitle = document.getElementById('modalTitle');
@@ -77,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     onError: (err) => {
       if (err === 'not_supported') {
-        showToast('Голосовой ввод не поддерживается браузером', 'warning');
+        showToast('Голосовой ввод не поддерживается', 'warning');
       } else if (err === 'not-allowed') {
         showToast('Доступ к микрофону запрещен', 'error');
       } else if (err !== 'no-speech') {
@@ -134,8 +152,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const bubble = document.createElement('div');
     bubble.className = `dialogue-bubble ${sender}-bubble ${isConflict ? 'conflict-bubble' : ''}`;
 
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dateObj = new Date();
+    const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     let avatarSvg = '';
     if (sender === 'assistant') {
@@ -241,7 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function loadEvents() {
     try {
-      let url = '/api/events?limit=300';
+      let url = '/api/events?limit=400';
       if (currentFilter === 'completed') {
         url += '&is_completed=true';
       } else if (currentFilter !== 'all') {
@@ -249,7 +267,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (currentSearchQuery.trim()) {
-        url = `/api/events/search?q=${encodeURIComponent(currentSearchQuery.trim())}&limit=50`;
+        url = `/api/events/search?q=${encodeURIComponent(currentSearchQuery.trim())}&limit=60`;
       }
 
       const res = await fetch(url);
@@ -257,6 +275,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const events = await res.json();
       currentEvents = events;
       renderEvents(events);
+      if (currentView === 'calendar') {
+        renderCalendar();
+      }
     } catch (e) {
       eventsList.innerHTML = `
         <div class="events-empty">
@@ -283,7 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (currentFilter === 'completed') {
       const completedEvents = events.filter(e => e.is_completed);
-      renderEventItems(completedEvents);
+      renderEventItems(completedEvents, eventsList);
       return;
     }
 
@@ -296,7 +317,7 @@ document.addEventListener('DOMContentLoaded', () => {
         header.className = 'events-section-header';
         header.innerHTML = `<span>В процессе</span><span class="badge">${active.length}</span>`;
         eventsList.appendChild(header);
-        renderEventItems(active);
+        renderEventItems(active, eventsList);
       }
 
       if (completed.length > 0) {
@@ -304,15 +325,15 @@ document.addEventListener('DOMContentLoaded', () => {
         header.className = 'events-section-header';
         header.innerHTML = `<span>Выполненные</span><span class="badge">${completed.length}</span>`;
         eventsList.appendChild(header);
-        renderEventItems(completed);
+        renderEventItems(completed, eventsList);
       }
       return;
     }
 
-    renderEventItems(events);
+    renderEventItems(events, eventsList);
   }
 
-  function renderEventItems(items) {
+  function renderEventItems(items, container) {
     const sorted = [...items].sort((a, b) => {
       const dtA = (a.date || '') + ' ' + (a.time || '00:00');
       const dtB = (b.date || '') + ' ' + (b.time || '00:00');
@@ -321,7 +342,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     sorted.forEach(ev => {
       const card = createEventCardElement(ev);
-      eventsList.appendChild(card);
+      container.appendChild(card);
     });
   }
 
@@ -401,7 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return card;
   }
 
-  eventsList.addEventListener('click', async (e) => {
+  function handleEventListClick(e) {
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
     const action = btn.dataset.action;
@@ -409,35 +430,32 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!id) return;
 
     if (action === 'toggle') {
-      try {
-        const res = await fetch(`/api/events/${id}/toggle`, { method: 'POST' });
-        if (res.ok) {
-          const updated = await res.json();
+      fetch(`/api/events/${id}/toggle`, { method: 'POST' })
+        .then(res => res.json())
+        .then(updated => {
           showToast(updated.is_completed ? 'Завершено' : 'Возвращено в работу', 'success');
           loadEvents();
-        }
-      } catch (err) {
-        showToast('Ошибка обновления статуса', 'error');
-      }
+        })
+        .catch(() => showToast('Ошибка обновления статуса', 'error'));
     } else if (action === 'edit') {
       const ev = currentEvents.find(item => item.id === id);
-      if (ev) {
-        openModalForEdit(ev);
-      }
+      if (ev) openModalForEdit(ev);
     } else if (action === 'delete') {
       if (confirm('Удалить эту запись?')) {
-        try {
-          const res = await fetch(`/api/events/${id}`, { method: 'DELETE' });
-          if (res.ok) {
-            showToast('Запись удалена', 'info');
-            loadEvents();
-          }
-        } catch (err) {
-          showToast('Ошибка при удалении', 'error');
-        }
+        fetch(`/api/events/${id}`, { method: 'DELETE' })
+          .then(res => {
+            if (res.ok) {
+              showToast('Запись удалена', 'info');
+              loadEvents();
+            }
+          })
+          .catch(() => showToast('Ошибка при удалении', 'error'));
       }
     }
-  });
+  }
+
+  eventsList.addEventListener('click', handleEventListClick);
+  calendarDayEvents.addEventListener('click', handleEventListClick);
 
   function formatCardDate(dateStr) {
     if (!dateStr) return '';
@@ -475,6 +493,152 @@ document.addEventListener('DOMContentLoaded', () => {
     if (num === 1) return 'запись';
     return 'записей';
   }
+
+  viewSwitchTabs.addEventListener('click', (e) => {
+    const btn = e.target.closest('.view-btn');
+    if (!btn) return;
+    viewSwitchTabs.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentView = btn.dataset.view;
+
+    if (currentView === 'calendar') {
+      eventsList.style.display = 'none';
+      agendaFiltersBar.style.display = 'none';
+      calendarWrapper.style.display = 'flex';
+      renderCalendar();
+    } else {
+      eventsList.style.display = 'flex';
+      agendaFiltersBar.style.display = 'flex';
+      calendarWrapper.style.display = 'none';
+      renderEvents(currentEvents);
+    }
+  });
+
+  const monthNames = [
+    'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+    'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+  ];
+
+  function renderCalendar() {
+    calendarMonthTitle.textContent = `${monthNames[calMonth]} ${calYear}`;
+
+    calendarDaysGrid.innerHTML = '';
+
+    const firstDayIndex = (new Date(calYear, calMonth, 1).getDay() + 6) % 7;
+    const daysInCurrentMonth = new Date(calYear, calMonth + 1, 0).getDate();
+    const daysInPrevMonth = new Date(calYear, calMonth, 0).getDate();
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    for (let i = firstDayIndex - 1; i >= 0; i--) {
+      const dayNum = daysInPrevMonth - i;
+      const prevDate = new Date(calYear, calMonth - 1, dayNum);
+      const dayStr = prevDate.toISOString().split('T')[0];
+      const cell = createCalendarDayCell(dayNum, dayStr, true, todayStr);
+      calendarDaysGrid.appendChild(cell);
+    }
+
+    for (let day = 1; day <= daysInCurrentMonth; day++) {
+      const monthStr = String(calMonth + 1).padStart(2, '0');
+      const dayPad = String(day).padStart(2, '0');
+      const dayStr = `${calYear}-${monthStr}-${dayPad}`;
+      const cell = createCalendarDayCell(day, dayStr, false, todayStr);
+      calendarDaysGrid.appendChild(cell);
+    }
+
+    const totalCells = firstDayIndex + daysInCurrentMonth;
+    const nextDays = (7 - (totalCells % 7)) % 7;
+    for (let day = 1; day <= nextDays; day++) {
+      const nextDate = new Date(calYear, calMonth + 1, day);
+      const dayStr = nextDate.toISOString().split('T')[0];
+      const cell = createCalendarDayCell(day, dayStr, true, todayStr);
+      calendarDaysGrid.appendChild(cell);
+    }
+
+    renderCalendarDayEvents(selectedDateStr);
+  }
+
+  function createCalendarDayCell(dayNum, dayStr, isOtherMonth, todayStr) {
+    const cell = document.createElement('div');
+    cell.className = `cal-day-cell ${isOtherMonth ? 'other-month' : ''} ${dayStr === todayStr ? 'is-today' : ''} ${dayStr === selectedDateStr ? 'is-selected' : ''}`;
+    cell.dataset.date = dayStr;
+
+    const dayEvents = currentEvents.filter(e => e.date === dayStr);
+
+    let dotsHtml = '';
+    if (dayEvents.length > 0) {
+      dotsHtml = '<div class="cal-dots">';
+      dayEvents.slice(0, 4).forEach(ev => {
+        dotsHtml += `<span class="cal-dot type-${ev.type}"></span>`;
+      });
+      if (dayEvents.length > 4) {
+        dotsHtml += `<span style="font-size:0.6rem;color:var(--text-muted);">+${dayEvents.length - 4}</span>`;
+      }
+      dotsHtml += '</div>';
+    }
+
+    cell.innerHTML = `
+      <div class="cal-day-top">
+        <span class="cal-day-num">${dayNum}</span>
+      </div>
+      ${dotsHtml}
+    `;
+
+    cell.addEventListener('click', () => {
+      selectedDateStr = dayStr;
+      calendarDaysGrid.querySelectorAll('.cal-day-cell').forEach(c => c.classList.remove('is-selected'));
+      cell.classList.add('is-selected');
+      renderCalendarDayEvents(dayStr);
+    });
+
+    return cell;
+  }
+
+  function renderCalendarDayEvents(dateStr) {
+    const formatted = formatCardDate(dateStr);
+    calendarSelectedDateLabel.textContent = `Планы на ${formatted} (${dateStr})`;
+
+    const eventsForDay = currentEvents.filter(e => e.date === dateStr);
+    calendarDayEvents.innerHTML = '';
+
+    if (eventsForDay.length === 0) {
+      calendarDayEvents.innerHTML = '<div class="events-empty"><p>На этот день нет записей</p></div>';
+      return;
+    }
+
+    renderEventItems(eventsForDay, calendarDayEvents);
+  }
+
+  prevMonthBtn.addEventListener('click', () => {
+    calMonth--;
+    if (calMonth < 0) {
+      calMonth = 11;
+      calYear--;
+    }
+    renderCalendar();
+  });
+
+  nextMonthBtn.addEventListener('click', () => {
+    calMonth++;
+    if (calMonth > 11) {
+      calMonth = 0;
+      calYear++;
+    }
+    renderCalendar();
+  });
+
+  calendarTodayBtn.addEventListener('click', () => {
+    const today = new Date();
+    calYear = today.getFullYear();
+    calMonth = today.getMonth();
+    selectedDateStr = today.toISOString().split('T')[0];
+    renderCalendar();
+  });
+
+  calAddForDayBtn.addEventListener('click', () => {
+    openModalForCreate();
+    formDate.value = selectedDateStr;
+  });
 
   filterTabs.addEventListener('click', (e) => {
     const tab = e.target.closest('.tab-btn');
@@ -591,7 +755,7 @@ document.addEventListener('DOMContentLoaded', () => {
     formAttendees.value = '';
 
     const today = new Date().toISOString().split('T')[0];
-    formDate.value = today;
+    formDate.value = selectedDateStr || today;
     formTime.value = '';
 
     const taskRadio = eventForm.querySelector('input[name="eventType"][value="task"]');
