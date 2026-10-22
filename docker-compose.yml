@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    image: voice-assistant:latest
+    container_name: voice-assistant
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/data:/app/backend/data
