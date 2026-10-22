@@ -58,11 +58,9 @@ async def call_groq_llm(prompt: str) -> Optional[Dict[str, Any]]:
 
 
 async def parse_query_with_llm_or_fallback(text: str) -> Dict[str, Any]:
-    # 1. Try Groq if configured
     if GROQ_API_KEY:
         llm_result = await call_groq_llm(text)
         if llm_result and "intent" in llm_result:
             return llm_result
 
-    # 2. Seamless local fallback (instant, 0 ms latency, no network, free)
     return parse_user_intent(text)

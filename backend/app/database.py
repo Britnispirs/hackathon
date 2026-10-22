@@ -37,7 +37,6 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_datetime ON events(date, time);")
 
-    # Create FTS5 virtual table for lightning-fast full-text search
     cursor.execute("""
     CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
         title,
@@ -49,7 +48,6 @@ def init_db():
     );
     """)
 
-    # Triggers to keep FTS index synchronized
     cursor.execute("""
     CREATE TRIGGER IF NOT EXISTS events_ai AFTER INSERT ON events BEGIN
         INSERT INTO events_fts(rowid, title, description, attendees) 
@@ -253,7 +251,6 @@ def db_search_fts(search_term: str, limit: int = 50) -> List[EventItem]:
         conn.close()
         return []
 
-    # FTS query with prefix matching on tokens
     fts_query = " ".join(f"{w}*" for w in words)
 
     try:
@@ -271,7 +268,6 @@ def db_search_fts(search_term: str, limit: int = 50) -> List[EventItem]:
         rows = cursor.fetchall()
         events = [row_to_event(r) for r in rows]
     except Exception:
-        # Fallback to standard LIKE if FTS fails
         like_term = f"%{search_term}%"
         cursor.execute(
             """

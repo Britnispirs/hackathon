@@ -1,15 +1,10 @@
-/**
- * Voice & Audio Manager for Web Speech API and Canvas Visualizer
- */
-
 class VoiceAssistantSpeech {
   constructor() {
     this.recognition = null;
     this.isListening = false;
-    this.isTtsEnabled = localStorage.getItem('tts_enabled') !== 'false'; // default true
+    this.isTtsEnabled = localStorage.getItem('tts_enabled') !== 'false';
     this.recognitionSupported = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
-    
-    // Web Audio Visualizer state
+
     this.canvas = null;
     this.canvasCtx = null;
     this.audioCtx = null;
@@ -28,10 +23,7 @@ class VoiceAssistantSpeech {
   }
 
   _initRecognition() {
-    if (!this.recognitionSupported) {
-      console.warn('SpeechRecognition is not supported in this browser.');
-      return;
-    }
+    if (!this.recognitionSupported) return;
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     this.recognition = new SpeechRecognition();
@@ -67,7 +59,6 @@ class VoiceAssistantSpeech {
     };
 
     this.recognition.onerror = (event) => {
-      console.warn('SpeechRecognition error:', event.error);
       this.isListening = false;
       if (this.onErrorCallback) {
         this.onErrorCallback(event.error);
@@ -105,11 +96,10 @@ class VoiceAssistantSpeech {
     if (this.isListening) return;
 
     try {
-      this.cancelSpeech(); // Silence TTS if currently speaking
+      this.cancelSpeech();
       await this.startMicStream();
       this.recognition.start();
     } catch (e) {
-      console.error('Failed to start recognition:', e);
       if (this.onErrorCallback) this.onErrorCallback(e.message);
     }
   }
@@ -118,9 +108,7 @@ class VoiceAssistantSpeech {
     if (!this.recognition || !this.isListening) return;
     try {
       this.recognition.stop();
-    } catch (e) {
-      console.warn('Error stopping recognition:', e);
-    }
+    } catch (e) {}
   }
 
   toggleListening() {
@@ -130,8 +118,6 @@ class VoiceAssistantSpeech {
       this.startListening();
     }
   }
-
-  /* ---------------- TTS (Text To Speech) ---------------- */
 
   toggleTts() {
     this.isTtsEnabled = !this.isTtsEnabled;
@@ -148,7 +134,6 @@ class VoiceAssistantSpeech {
 
     this.cancelSpeech();
 
-    // Clean markdown or technical characters for clean speech
     const cleanText = text
       .replace(/•/g, '')
       .replace(/[#*_~`]/g, '')
@@ -162,7 +147,6 @@ class VoiceAssistantSpeech {
     utterance.rate = 1.05;
     utterance.pitch = 1.0;
 
-    // Pick a natural Russian voice if available
     const voices = window.speechSynthesis.getVoices();
     const ruVoice = voices.find(v => v.lang.startsWith('ru') && !v.name.includes('eSpeak')) ||
                     voices.find(v => v.lang.startsWith('ru'));
@@ -194,8 +178,6 @@ class VoiceAssistantSpeech {
       window.speechSynthesis.cancel();
     }
   }
-
-  /* ---------------- Audio Visualizer Canvas ---------------- */
 
   initVisualizer(canvasElement) {
     this.canvas = canvasElement;
@@ -230,7 +212,6 @@ class VoiceAssistantSpeech {
       this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
       this.isMicActive = true;
     } catch (err) {
-      console.warn('Could not acquire microphone for audio visualization:', err);
       this.isMicActive = false;
     }
   }
@@ -271,35 +252,25 @@ class VoiceAssistantSpeech {
         intensity = (sum / this.dataArray.length) / 255;
       }
 
-      phase += 0.04;
+      phase += 0.03;
 
-      // Draw flowing sine waves (idle or active pulse)
-      const numWaves = 3;
-      for (let w = 0; w < numWaves; w++) {
-        ctx.beginPath();
-        const baseAlpha = 0.15 + (w * 0.1) + (intensity * 0.4);
-        const waveColor = w === 0 ? `rgba(99, 102, 241, ${baseAlpha})` :
-                          w === 1 ? `rgba(6, 182, 212, ${baseAlpha})` :
-                                    `rgba(244, 63, 94, ${this.isListening ? baseAlpha : 0.08})`;
+      ctx.beginPath();
+      ctx.strokeStyle = this.isListening ? '#ef4444' : '#373d4b';
+      ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
 
-        ctx.strokeStyle = waveColor;
-        ctx.lineWidth = 2 * (window.devicePixelRatio || 1);
+      const amp = (6 + intensity * 25) * (window.devicePixelRatio || 1);
+      const freq = 0.015;
 
-        const freq = 0.008 + (w * 0.003);
-        const amp = (10 + (w * 6) + (intensity * 40)) * (window.devicePixelRatio || 1);
-
-        for (let x = 0; x < width; x += 4) {
-          const y = centerY + Math.sin(x * freq + phase + w * 1.5) * amp;
-          if (x === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
+      for (let x = 0; x < width; x += 4) {
+        const y = centerY + Math.sin(x * freq + phase) * amp;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
       }
+      ctx.stroke();
     };
 
     render();
   }
 }
 
-// Global instance
 window.VoiceAssistantSpeech = VoiceAssistantSpeech;

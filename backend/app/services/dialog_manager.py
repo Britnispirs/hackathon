@@ -25,7 +25,6 @@ from backend.app.services.nlu_parser import (
 )
 from backend.app.services.llm_client import parse_query_with_llm_or_fallback
 
-# In-memory session context storage
 SESSION_CONTEXT: Dict[str, Dict[str, Any]] = {}
 
 
@@ -66,7 +65,6 @@ class DialogManager:
         session = get_session(session_id)
         text = message.strip()
 
-        # 1. Check if user is responding to an awaiting clarification
         if session.get("awaiting_field") == "time" and session.get("draft_event"):
             extracted_time = parse_russian_time(text)
             if extracted_time:
@@ -75,7 +73,6 @@ class DialogManager:
                 session["awaiting_field"] = None
                 session["draft_event"] = None
 
-                # Check conflict for meetings
                 if draft.type == EventType.MEETING and draft.time:
                     conflicts = db_find_conflicts(draft.date, draft.time)
                     if conflicts:
@@ -114,11 +111,9 @@ class DialogManager:
                     requires_clarification=True,
                 )
 
-        # 2. Parse NLU / LLM intent
         parsed = await parse_query_with_llm_or_fallback(text)
         intent = parsed.get("intent", "UNKNOWN")
 
-        # 3. Handle INTENT: COMPLETE_EVENT
         if intent == "COMPLETE_EVENT":
             query = parsed.get("query", "")
             target_event = None
@@ -144,7 +139,6 @@ class DialogManager:
                 voice_text="Не нашел такую задачу. Какую задачу отметить выполненной?",
             )
 
-        # 4. Handle INTENT: DELETE_EVENT
         if intent == "DELETE_EVENT":
             query = parsed.get("query", "")
             target_event = None
@@ -169,7 +163,6 @@ class DialogManager:
                 voice_text="Какую задачу или встречу удалить?",
             )
 
-        # 5. Handle INTENT: RESCHEDULE_EVENT
         if intent == "RESCHEDULE_EVENT":
             new_date = parsed.get("date")
             new_time = parsed.get("time")
@@ -196,12 +189,10 @@ class DialogManager:
                 voice_text="Какое событие нужно перенести?",
             )
 
-        # 6. Handle INTENT: SEARCH_EVENTS
         if intent == "SEARCH_EVENTS":
             query = parsed.get("query", "")
             results = db_search_fts(query, limit=10)
             if not results:
-                # Try simple query search in title
                 filters = EventFilter(query=query)
                 results = db_list_events(filters, limit=10)
 
@@ -223,7 +214,6 @@ class DialogManager:
                 reply = f"По запросу «{query}» ничего не найдено."
                 return AssistantResponse(reply_text=reply, voice_text=reply)
 
-        # 7. Handle INTENT: LIST_EVENTS
         if intent == "LIST_EVENTS":
             target_date = parsed.get("date", date.today().isoformat())
             is_week = parsed.get("is_week", False)
@@ -257,7 +247,6 @@ class DialogManager:
                 reply = f"На этот период ({period_title}) запланированных событий нет. Вы свободны!"
                 return AssistantResponse(reply_text=reply, voice_text=reply)
 
-        # 8. Handle INTENT: CREATE_EVENT
         if intent == "CREATE_EVENT":
             event_type = parsed.get("type", EventType.TASK)
             title = parsed.get("title", text)
@@ -265,7 +254,6 @@ class DialogManager:
             target_time = parsed.get("time")
             attendees = parsed.get("attendees")
 
-            # Check if this is a meeting without a specified time -> ask clarification!
             if event_type == EventType.MEETING and not target_time:
                 draft = EventCreate(
                     type=event_type,
@@ -287,7 +275,6 @@ class DialogManager:
                     ),
                 )
 
-            # Check for conflict if meeting
             if event_type == EventType.MEETING and target_time:
                 conflicts = db_find_conflicts(target_date, target_time)
                 new_event = db_create_event(
@@ -318,7 +305,6 @@ class DialogManager:
                         ),
                     )
 
-            # Standard create
             created = db_create_event(
                 EventCreate(
                     type=event_type,
@@ -340,7 +326,6 @@ class DialogManager:
                 action=AssistantAction(action_type="CREATE", target_event_id=created.id),
             )
 
-        # Fallback response
         return AssistantResponse(
             reply_text="Я могу создать задачу или встречу, найти события в расписании или отметить задачу выполненной. Что нужно сделать?",
             voice_text="Чем я могу вам помочь?",

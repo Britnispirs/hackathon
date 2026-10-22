@@ -1,30 +1,21 @@
-/**
- * Main Application Logic for Voice Assistant & Agenda Feed
- */
-
 document.addEventListener('DOMContentLoaded', () => {
-  // ---------------- State & Variables ----------------
   let currentEvents = [];
-  let currentFilter = 'all'; // all, meeting, task, reminder
+  let currentFilter = 'all';
   let currentSearchQuery = '';
   let searchDebounceTimeout = null;
   let conflictCheckTimeout = null;
 
-  // Generate or retrieve persistent session ID
   let sessionId = sessionStorage.getItem('assistant_session_id');
   if (!sessionId) {
     sessionId = 'session_' + Math.random().toString(36).substring(2, 9);
     sessionStorage.setItem('assistant_session_id', sessionId);
   }
 
-  // ---------------- DOM References ----------------
-  // Header
   const brandOrb = document.getElementById('brandOrb');
   const openCreateModalBtn = document.getElementById('openCreateModalBtn');
   const ttsToggleBtn = document.getElementById('ttsToggleBtn');
   const resetSessionBtn = document.getElementById('resetSessionBtn');
 
-  // Assistant Pane
   const audioVisualizer = document.getElementById('audioVisualizer');
   const micBtn = document.getElementById('micBtn');
   const voiceStatus = document.getElementById('voiceStatus');
@@ -33,14 +24,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const textInputForm = document.getElementById('textInputForm');
   const queryInput = document.getElementById('queryInput');
 
-  // Agenda Pane
   const eventsCount = document.getElementById('eventsCount');
   const filterTabs = document.getElementById('filterTabs');
   const agendaSearchInput = document.getElementById('agendaSearchInput');
   const clearSearchBtn = document.getElementById('clearSearchBtn');
   const eventsList = document.getElementById('eventsList');
 
-  // Modal
   const eventModal = document.getElementById('eventModal');
   const modalTitle = document.getElementById('modalTitle');
   const closeModalBtn = document.getElementById('closeModalBtn');
@@ -55,34 +44,28 @@ document.addEventListener('DOMContentLoaded', () => {
   const formAttendees = document.getElementById('formAttendees');
   const formDescription = document.getElementById('formDescription');
 
-  // Toast
   const toastContainer = document.getElementById('toastContainer');
 
-  // ---------------- Speech & Audio Init ----------------
   const speech = new VoiceAssistantSpeech();
   speech.initVisualizer(audioVisualizer);
 
-  // Update initial TTS button state
   updateTtsButtonState(speech.isTtsEnabled);
 
   speech.setCallbacks({
     onStatusChange: (status) => {
       if (status === 'listening') {
-        voiceStatus.textContent = 'Слушаю вас... Говорите';
+        voiceStatus.textContent = 'Слушаю вас...';
         voiceStatus.className = 'voice-status listening';
         micBtn.classList.add('listening');
         micBtn.classList.remove('processing');
-        brandOrb.classList.add('pulse');
       } else if (status === 'speaking') {
         voiceStatus.textContent = 'Ассистент отвечает...';
         voiceStatus.className = 'voice-status speaking';
         micBtn.classList.remove('listening', 'processing');
-        brandOrb.classList.add('pulse');
       } else {
-        voiceStatus.textContent = 'Нажмите на микрофон или скажите команду';
+        voiceStatus.textContent = 'Нажмите на микрофон или введите команду';
         voiceStatus.className = 'voice-status';
         micBtn.classList.remove('listening', 'processing');
-        brandOrb.classList.remove('pulse');
       }
     },
     onResult: (text, isFinal) => {
@@ -94,17 +77,16 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     onError: (err) => {
       if (err === 'not_supported') {
-        showToast('Голосовой ввод не поддерживается браузером. Используйте Chrome или Edge.', 'warning');
+        showToast('Голосовой ввод не поддерживается браузером', 'warning');
       } else if (err === 'not-allowed') {
-        showToast('Доступ к микрофону запрещен в настройках браузера.', 'error');
+        showToast('Доступ к микрофону запрещен', 'error');
       } else if (err !== 'no-speech') {
-        showToast(`Ошибка распознавания: ${err}`, 'warning');
+        showToast(`Ошибка: ${err}`, 'warning');
       }
     }
   });
 
-  // ---------------- Toast Helper ----------------
-  function showToast(message, type = 'info', duration = 3500) {
+  function showToast(message, type = 'info', duration = 3000) {
     if (!toastContainer) return;
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
@@ -112,10 +94,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let iconSvg = '';
     if (type === 'success') {
       iconSvg = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>';
-    } else if (type === 'error' || type === 'warning') {
-      iconSvg = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>';
     } else {
-      iconSvg = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
+      iconSvg = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>';
     }
 
     toast.innerHTML = `${iconSvg}<span>${escapeHtml(message)}</span>`;
@@ -123,9 +103,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setTimeout(() => {
       toast.style.opacity = '0';
-      toast.style.transform = 'translateY(10px)';
-      toast.style.transition = 'all 0.3s ease';
-      setTimeout(() => toast.remove(), 300);
+      toast.style.transition = 'opacity 0.2s ease';
+      setTimeout(() => toast.remove(), 200);
     }, duration);
   }
 
@@ -151,7 +130,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ---------------- Dialogue History Management ----------------
   function appendDialogueBubble(text, sender = 'assistant', isConflict = false) {
     const bubble = document.createElement('div');
     bubble.className = `dialogue-bubble ${sender}-bubble ${isConflict ? 'conflict-bubble' : ''}`;
@@ -192,21 +170,17 @@ document.addEventListener('DOMContentLoaded', () => {
     return bubble;
   }
 
-  // ---------------- Assistant Communication ----------------
   async function sendMessage(text) {
     if (!text || !text.trim()) return;
 
-    // Append user message
     appendDialogueBubble(text, 'user');
 
-    // UI Loading state
     micBtn.classList.add('processing');
-    voiceStatus.textContent = 'Думаю...';
+    voiceStatus.textContent = 'Обработка...';
 
-    // Temporary loading placeholder
     const loadingBubble = appendDialogueBubble('...', 'assistant');
     const loadingP = loadingBubble.querySelector('p');
-    loadingP.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px;"></span> Обработка запроса...';
+    loadingP.innerHTML = '<span class="spinner" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:6px;"></span> Обработка...';
 
     try {
       const response = await fetch('/api/assistant/chat', {
@@ -219,24 +193,20 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       if (!response.ok) {
-        throw new Error(`Ошибка сервера: ${response.status}`);
+        throw new Error(`Статус: ${response.status}`);
       }
 
       const data = await response.json();
-
-      // Replace loading bubble text
       const isConflict = data.action && data.action.action_type === 'CREATE_WITH_CONFLICT';
       loadingP.textContent = data.reply_text;
       if (isConflict) {
         loadingBubble.classList.add('conflict-bubble');
       }
 
-      // Voice response
       if (data.voice_text || data.reply_text) {
         speech.speak(data.voice_text || data.reply_text);
       }
 
-      // Handle assistant actions
       if (data.action) {
         const actionType = data.action.action_type;
         if (actionType === 'SEARCH' || actionType === 'LIST') {
@@ -246,15 +216,11 @@ document.addEventListener('DOMContentLoaded', () => {
             loadEvents();
           }
         } else {
-          // CREATE, CREATE_WITH_CONFLICT, UPDATE, DELETE, COMPLETE
           await loadEvents();
-          if (data.action.target_event_id) {
-            highlightEventCard(data.action.target_event_id);
-          }
         }
 
         if (actionType === 'CREATE_WITH_CONFLICT') {
-          showToast('Внимание: обнаружен конфликт по времени в расписании!', 'warning', 5000);
+          showToast('Обнаружен конфликт по времени в расписании', 'warning');
         }
       }
 
@@ -263,44 +229,39 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
     } catch (err) {
-      console.error('Chat error:', err);
-      loadingP.textContent = 'Произошла ошибка при связи с ассистентом. Попробуйте еще раз.';
-      showToast('Не удалось получить ответ ассистента', 'error');
+      loadingP.textContent = 'Ошибка при обработке запроса.';
+      showToast('Ошибка связи с сервером', 'error');
     } finally {
       micBtn.classList.remove('processing');
       if (!speech.isListening) {
-        voiceStatus.textContent = 'Нажмите на микрофон или скажите команду';
+        voiceStatus.textContent = 'Нажмите на микрофон или введите команду';
       }
     }
   }
 
-  // ---------------- Agenda & Events API ----------------
   async function loadEvents() {
     try {
-      let url = '/api/events?limit=200';
-      if (currentFilter !== 'all') {
+      let url = '/api/events?limit=300';
+      if (currentFilter === 'completed') {
+        url += '&is_completed=true';
+      } else if (currentFilter !== 'all') {
         url += `&type=${encodeURIComponent(currentFilter)}`;
       }
+
       if (currentSearchQuery.trim()) {
         url = `/api/events/search?q=${encodeURIComponent(currentSearchQuery.trim())}&limit=50`;
       }
 
       const res = await fetch(url);
-      if (!res.ok) throw new Error('Ошибка загрузки событий');
+      if (!res.ok) throw new Error('Ошибка загрузки');
       const events = await res.json();
       currentEvents = events;
       renderEvents(events);
     } catch (e) {
-      console.error('Failed to load events:', e);
       eventsList.innerHTML = `
         <div class="events-empty">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:36px;height:36px;color:#fb7185;">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
-          <span>Не удалось загрузить расписание</span>
-          <button class="btn btn-secondary" onclick="window.location.reload()">Обновить страницу</button>
+          <p>Не удалось загрузить данные</p>
+          <button class="btn btn-secondary" onclick="window.location.reload()">Обновить</button>
         </div>
       `;
     }
@@ -312,30 +273,52 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!events || events.length === 0) {
       eventsList.innerHTML = `
         <div class="events-empty">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;color:var(--text-muted);">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-            <line x1="16" y1="2" x2="16" y2="6"></line>
-            <line x1="8" y1="2" x2="8" y2="6"></line>
-            <line x1="3" y1="10" x2="21" y2="10"></line>
-          </svg>
           <p>Записей не найдено</p>
-          <span style="font-size:0.8rem;color:var(--text-muted);">Скажите ассистенту команду или нажмите «Новая запись»</span>
         </div>
       `;
       return;
     }
 
-    // Sort: uncompleted first, then by date and time
-    const sorted = [...events].sort((a, b) => {
-      if (a.is_completed !== b.is_completed) {
-        return a.is_completed ? 1 : -1;
+    eventsList.innerHTML = '';
+
+    if (currentFilter === 'completed') {
+      const completedEvents = events.filter(e => e.is_completed);
+      renderEventItems(completedEvents);
+      return;
+    }
+
+    if (currentFilter === 'all') {
+      const active = events.filter(e => !e.is_completed);
+      const completed = events.filter(e => e.is_completed);
+
+      if (active.length > 0) {
+        const header = document.createElement('div');
+        header.className = 'events-section-header';
+        header.innerHTML = `<span>В процессе</span><span class="badge">${active.length}</span>`;
+        eventsList.appendChild(header);
+        renderEventItems(active);
       }
+
+      if (completed.length > 0) {
+        const header = document.createElement('div');
+        header.className = 'events-section-header';
+        header.innerHTML = `<span>Выполненные</span><span class="badge">${completed.length}</span>`;
+        eventsList.appendChild(header);
+        renderEventItems(completed);
+      }
+      return;
+    }
+
+    renderEventItems(events);
+  }
+
+  function renderEventItems(items) {
+    const sorted = [...items].sort((a, b) => {
       const dtA = (a.date || '') + ' ' + (a.time || '00:00');
       const dtB = (b.date || '') + ' ' + (b.time || '00:00');
       return dtA.localeCompare(dtB);
     });
 
-    eventsList.innerHTML = '';
     sorted.forEach(ev => {
       const card = createEventCardElement(ev);
       eventsList.appendChild(card);
@@ -418,16 +401,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return card;
   }
 
-  function highlightEventCard(id) {
-    const card = document.getElementById(`eventCard-${id}`);
-    if (card) {
-      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      card.classList.add('just-added');
-      setTimeout(() => card.classList.remove('just-added'), 3000);
-    }
-  }
-
-  // Event Delegated Actions (Toggle, Edit, Delete)
   eventsList.addEventListener('click', async (e) => {
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
@@ -440,11 +413,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await fetch(`/api/events/${id}/toggle`, { method: 'POST' });
         if (res.ok) {
           const updated = await res.json();
-          showToast(`«${updated.title}» ${updated.is_completed ? 'выполнена' : 'возвращена в работу'}`, 'success');
+          showToast(updated.is_completed ? 'Завершено' : 'Возвращено в работу', 'success');
           loadEvents();
         }
       } catch (err) {
-        showToast('Не удалось обновить статус', 'error');
+        showToast('Ошибка обновления статуса', 'error');
       }
     } else if (action === 'edit') {
       const ev = currentEvents.find(item => item.id === id);
@@ -466,7 +439,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Date Formatting Helpers
   function formatCardDate(dateStr) {
     if (!dateStr) return '';
     try {
@@ -504,7 +476,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return 'записей';
   }
 
-  // ---------------- Filters & Search ----------------
   filterTabs.addEventListener('click', (e) => {
     const tab = e.target.closest('.tab-btn');
     if (!tab) return;
@@ -521,7 +492,7 @@ document.addEventListener('DOMContentLoaded', () => {
     searchDebounceTimeout = setTimeout(() => {
       currentSearchQuery = val;
       loadEvents();
-    }, 280);
+    }, 250);
   });
 
   clearSearchBtn.addEventListener('click', () => {
@@ -531,7 +502,6 @@ document.addEventListener('DOMContentLoaded', () => {
     loadEvents();
   });
 
-  // ---------------- Quick Prompts ----------------
   quickPrompts.addEventListener('click', (e) => {
     const chip = e.target.closest('.chip');
     if (!chip) return;
@@ -541,7 +511,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ---------------- Input Form Submission ----------------
   textInputForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const text = queryInput.value.trim();
@@ -551,12 +520,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ---------------- Microphone Button & Hotkeys ----------------
   micBtn.addEventListener('click', () => {
     speech.toggleListening();
   });
 
-  // Hotkey: Space bar Push-to-Talk (when not inside inputs)
   window.addEventListener('keydown', (e) => {
     const activeEl = document.activeElement;
     const isInputActive = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
@@ -581,11 +548,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ---------------- Header Buttons ----------------
   ttsToggleBtn.addEventListener('click', () => {
     const enabled = speech.toggleTts();
     updateTtsButtonState(enabled);
-    showToast(enabled ? 'Голосовые ответы включены' : 'Голосовые ответы выключены', 'info');
+    showToast(enabled ? 'Голос включен' : 'Голос выключен', 'info');
   });
 
   resetSessionBtn.addEventListener('click', async () => {
@@ -606,18 +572,17 @@ document.addEventListener('DOMContentLoaded', () => {
             </svg>
           </div>
           <div class="bubble-content">
-            <p>Контекст диалога сброшен. Чем я могу помочь?</p>
+            <p>Диалог сброшен. Чем помочь?</p>
             <span class="bubble-time">Сейчас</span>
           </div>
         </div>
       `;
-      showToast('Контекст ассистента успешно сброшен', 'info');
+      showToast('Диалог сброшен', 'info');
     } catch (e) {
-      showToast('Не удалось сбросить контекст', 'error');
+      showToast('Ошибка сброса диалога', 'error');
     }
   });
 
-  // ---------------- Modal Create / Edit ----------------
   function openModalForCreate() {
     modalTitle.textContent = 'Новая запись';
     formEventId.value = '';
@@ -625,12 +590,10 @@ document.addEventListener('DOMContentLoaded', () => {
     formDescription.value = '';
     formAttendees.value = '';
 
-    // Default date: today
     const today = new Date().toISOString().split('T')[0];
     formDate.value = today;
     formTime.value = '';
 
-    // Default type: task
     const taskRadio = eventForm.querySelector('input[name="eventType"][value="task"]');
     if (taskRadio) taskRadio.checked = true;
 
@@ -655,7 +618,6 @@ document.addEventListener('DOMContentLoaded', () => {
     eventModal.style.display = 'flex';
     formTitle.focus();
 
-    // Check conflict on opening if meeting with time
     if (ev.type === 'meeting' && ev.date && ev.time) {
       checkModalConflict(ev.date, ev.time, ev.id);
     }
@@ -670,7 +632,6 @@ document.addEventListener('DOMContentLoaded', () => {
     formConflictAlert.style.display = 'none';
   }
 
-  // Conflict live checking
   async function checkModalConflict(dateVal, timeVal, excludeId = null) {
     if (!dateVal || !timeVal) {
       hideConflictAlert();
@@ -690,7 +651,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (res.ok) {
         const conflicts = await res.json();
         if (conflicts && conflicts.length > 0) {
-          conflictAlertText.textContent = `Внимание: в это время уже запланирована встреча «${conflicts[0].title}»!`;
+          conflictAlertText.textContent = `Внимание: в это время встреча «${conflicts[0].title}».`;
           formConflictAlert.style.display = 'flex';
         } else {
           hideConflictAlert();
@@ -701,7 +662,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Listeners for live conflict check
   function triggerConflictCheck() {
     clearTimeout(conflictCheckTimeout);
     conflictCheckTimeout = setTimeout(() => {
@@ -726,7 +686,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Submit Modal Form
   eventForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -739,7 +698,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const description = formDescription.value.trim() || null;
 
     if (!title || !dateVal) {
-      showToast('Заполните обязательные поля: название и дату', 'warning');
+      showToast('Укажите название и дату', 'warning');
       return;
     }
 
@@ -769,20 +728,16 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (!res.ok) {
-        throw new Error('Ошибка при сохранении события');
+        throw new Error('Ошибка сохранения');
       }
 
-      const saved = await res.json();
       closeEventModal();
-      showToast(id ? 'Запись обновлена' : 'Новая запись создана', 'success');
-      await loadEvents();
-      highlightEventCard(saved.id);
+      showToast(id ? 'Запись сохранена' : 'Запись добавлена', 'success');
+      loadEvents();
     } catch (err) {
-      console.error('Error saving event:', err);
-      showToast('Не удалось сохранить запись', 'error');
+      showToast('Не удалось сохранить', 'error');
     }
   });
 
-  // ---------------- Initial Load ----------------
   loadEvents();
 });

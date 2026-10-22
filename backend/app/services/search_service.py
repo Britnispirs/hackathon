@@ -16,7 +16,6 @@ SYNONYM_CLUSTERS = [
 def tokenize_russian(text: str) -> List[str]:
     text = text.lower().replace("ё", "е")
     words = re.findall(r"\b[а-яa-z0-9]{3,}\b", text)
-    # Simple Russian stemming (strip common inflection endings)
     stems = []
     endings = (
         "ями", "ами", "ому", "ему", "ого", "его", "ыми", "ими", "ешь", "ете",
@@ -41,7 +40,6 @@ def calculate_semantic_similarity(query: str, target: str) -> float:
     if not q_tokens or not t_tokens:
         return 0.0
 
-    # Expand query tokens with synonyms
     expanded_q = set(q_tokens)
     q_words_raw = set(re.findall(r"\b[а-яa-z0-9]+\b", query.lower().replace("ё", "е")))
     for word in q_words_raw:
@@ -50,10 +48,8 @@ def calculate_semantic_similarity(query: str, target: str) -> float:
                 for syn in cluster:
                     expanded_q.update(tokenize_russian(syn))
 
-    # Overlap score
     intersection = expanded_q.intersection(t_tokens)
     if not intersection:
-        # Check substring match
         for qt in expanded_q:
             for tt in t_tokens:
                 if qt in tt or tt in qt:
@@ -67,7 +63,6 @@ def hybrid_search_events(query: str, limit: int = 15) -> List[EventItem]:
     if not query or not query.strip():
         return db_list_events(limit=limit)
 
-    # 1. First get FTS5 candidate matches
     fts_results = db_search_fts(query, limit=50)
     all_events_dict: Dict[int, Tuple[EventItem, float]] = {}
 
@@ -75,7 +70,6 @@ def hybrid_search_events(query: str, limit: int = 15) -> List[EventItem]:
         score = 1.0 / (1.0 + rank * 0.1)
         all_events_dict[ev.id] = (ev, score)
 
-    # 2. Score with semantic similarity on all events if candidates are few
     if len(all_events_dict) < limit:
         all_events = db_list_events(limit=250)
         for ev in all_events:
@@ -88,6 +82,5 @@ def hybrid_search_events(query: str, limit: int = 15) -> List[EventItem]:
                 else:
                     all_events_dict[ev.id] = (ev, sim)
 
-    # 3. Sort by total score descending
     sorted_items = sorted(all_events_dict.values(), key=lambda x: x[1], reverse=True)
     return [item[0] for item in sorted_items[:limit]]

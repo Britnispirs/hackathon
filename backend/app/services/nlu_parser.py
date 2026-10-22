@@ -32,14 +32,12 @@ WEEKDAYS_RU = {
 def parse_russian_time(text: str) -> Optional[str]:
     lower = text.lower()
 
-    # Pattern: HH:MM
     match_colon = re.search(r"\b([0-1]?[0-9]|2[0-3]):([0-5][0-9])\b", lower)
     if match_colon:
         hours = int(match_colon.group(1))
         minutes = int(match_colon.group(2))
         return f"{hours:02d}:{minutes:02d}"
 
-    # Pattern: "в 10 утра", "в 7 вечера", "в 15 часов"
     match_words = re.search(
         r"(?:в|к|на)\s*([0-2]?[0-9])\s*(?:часов|часа|час)?\s*(утра|дня|вечера|ночи)?",
         lower,
@@ -54,7 +52,6 @@ def parse_russian_time(text: str) -> Optional[str]:
         if 0 <= hours <= 23:
             return f"{hours:02d}:00"
 
-    # Pattern: "через N часа/часов/минут"
     match_rel = re.search(r"через\s+(\d+)\s*(час|часа|часов|минут|минуты)", lower)
     if match_rel:
         val = int(match_rel.group(1))
@@ -90,7 +87,6 @@ def parse_russian_date(text: str, base_date: Optional[date] = None) -> Optional[
         days_ahead = (7 - base_date.weekday()) + 0
         return (base_date + timedelta(days=days_ahead)).isoformat()
 
-    # Pattern: "в следующую пятницу" or "в пятницу"
     for wday_name, wday_num in WEEKDAYS_RU.items():
         pattern = rf"\b(?:в|во|на)?\s*(следующий|следующую)?\s*{wday_name}\b"
         match = re.search(pattern, lower)
@@ -104,7 +100,6 @@ def parse_russian_date(text: str, base_date: Optional[date] = None) -> Optional[
                 days_diff += 7
             return (base_date + timedelta(days=days_diff)).isoformat()
 
-    # Pattern: "15 мая", "24 апреля", "1 января"
     for month_name, month_num in MONTHS_RU.items():
         pattern = rf"\b(\d{{1,2}})\s+{month_name}\b"
         match = re.search(pattern, lower)
@@ -119,7 +114,6 @@ def parse_russian_date(text: str, base_date: Optional[date] = None) -> Optional[
             except ValueError:
                 pass
 
-    # Pattern: YYYY-MM-DD or DD.MM.YYYY
     match_iso = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", lower)
     if match_iso:
         return f"{match_iso.group(1)}-{match_iso.group(2)}-{match_iso.group(3)}"
@@ -179,7 +173,6 @@ def clean_title(raw_text: str, event_type: EventType, date_str: Optional[str], t
 def parse_user_intent(text: str) -> Dict[str, Any]:
     lower = text.lower().strip()
 
-    # 1. Complete task
     if any(k in lower for k in ["отметь выполненной", "отметь задачу выполненной", "выполнил задачу", "заверши задачу", "сделано", "отметь как сделано"]):
         query = re.sub(r"(отметь|задачу|выполненной|как сделано|заверши|сделано|пожалуйста)", "", lower).strip()
         query = re.sub(r"\bпро\b|\bпо\b", "", query).strip()
@@ -189,7 +182,6 @@ def parse_user_intent(text: str) -> Dict[str, Any]:
             "raw_text": text,
         }
 
-    # 2. Delete event
     if any(k in lower for k in ["удали", "удалить", "отмени", "отменить", "стереть"]):
         query = re.sub(r"(удали|удалить|отмени|отменить|задачу|встречу|напоминание|пожалуйста)", "", lower).strip()
         query = re.sub(r"\bпро\b|\bпо\b", "", query).strip()
@@ -199,7 +191,6 @@ def parse_user_intent(text: str) -> Dict[str, Any]:
             "raw_text": text,
         }
 
-    # 3. Reschedule event
     if any(k in lower for k in ["перенеси", "перенести", "сдвинь", "поменяй время", "отложи"]):
         target_date = parse_russian_date(lower)
         target_time = parse_russian_time(lower)
@@ -210,7 +201,6 @@ def parse_user_intent(text: str) -> Dict[str, Any]:
             "raw_text": text,
         }
 
-    # 4. Search old events
     if any(k in lower for k in [
         "найди", "найти", "поищи", "когда у меня была", "когда была", "когда-то ставил", "найди ее", "найди задачу", "найди встречу"
     ]):
@@ -222,7 +212,6 @@ def parse_user_intent(text: str) -> Dict[str, Any]:
             "raw_text": text,
         }
 
-    # 5. List events (querying schedule)
     list_markers = [
         "что у меня", "какие планы", "покажи мои", "какие задачи", "есть ли у меня",
         "что запланировано", "планы на", "список задач", "расписание"
@@ -238,7 +227,6 @@ def parse_user_intent(text: str) -> Dict[str, Any]:
             "raw_text": text,
         }
 
-    # 6. Create event (meeting, reminder, task)
     is_meeting = any(k in lower for k in ["встреча", "созвон", "планёрка", "планерка", "демо", "встречу"])
     is_reminder = any(k in lower for k in ["напомни", "напоминание", "не забудь"])
 
@@ -254,7 +242,6 @@ def parse_user_intent(text: str) -> Dict[str, Any]:
 
     title = clean_title(text, event_type, extracted_date, extracted_time)
 
-    # Extract attendee if meeting
     attendee = None
     attendee_match = re.search(r"(?:с|со|для)\s+([А-Яа-яA-Za-z]+)", text)
     if attendee_match and attendee_match.group(1).lower() not in ["командой", "партнером", "партнёром"]:

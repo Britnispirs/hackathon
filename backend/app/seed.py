@@ -30,7 +30,6 @@ def extract_attendee(text: str) -> str:
     lower = text.lower()
     for name in NAMES:
         if name.lower() in lower:
-            # Map instrumental case back to nominative if desired or keep as is
             return name
     for comp in COMPANIES:
         if comp.lower() in lower:

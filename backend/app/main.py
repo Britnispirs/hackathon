@@ -15,7 +15,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS setup
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,7 +23,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(events_router)
 app.include_router(assistant_router)
 
@@ -32,7 +30,6 @@ app.include_router(assistant_router)
 @app.on_event("startup")
 def on_startup():
     init_db()
-    # Seed initial test events if database is fresh
     count = seed_database(force=False)
     print(f"[Startup] Database initialized with {count} events.")
 
@@ -42,7 +39,6 @@ def health_check():
     return {"status": "ok", "service": "voice-assistant"}
 
 
-# Serve frontend static assets if directory exists
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend"))
 
 if os.path.exists(FRONTEND_DIR):
