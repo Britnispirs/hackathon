@@ -3,9 +3,6 @@
 Прототип интеллектуального голосового ассистента для управления личным расписанием, встречами, задачами и напоминаниями на естественном русском языке.
 
 - Репозиторий: [https://github.com/Britnispirs/hackathon.git](https://github.com/Britnispirs/hackathon.git)
-- Веб-интерфейс: `http://localhost:8000`
-- Swagger API Docs: `http://localhost:8000/docs`
-
 ---
 
 ## Основные возможности
@@ -92,8 +89,6 @@
 ```bash
 docker compose up -d --build
 ```
-
-Приложение будет доступно по адресу: **`http://localhost:8000`**.
 
 Для остановки:
 ```bash

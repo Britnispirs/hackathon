@@ -17,8 +17,8 @@ from backend.app.database import (
     db_delete_event,
     db_list_events,
     db_find_conflicts,
-    db_search_fts,
 )
+from backend.app.services.search_service import hybrid_search_events
 from backend.app.services.nlu_parser import (
     parse_russian_date,
     parse_russian_time,
@@ -54,7 +54,7 @@ def format_russian_date_spoken(date_str: str) -> str:
             "", "января", "февраля", "марта", "апреля", "мая", "июня",
             "июля", "августа", "сентября", "октября", "ноября", "декабря"
         ]
-        return f"{dt.day} {months[dt.month]}"
+        return f"{dt.day} {months[dt.month]} {dt.year if dt.year != today.year else ''}".strip()
     except Exception:
         return date_str
 
@@ -118,7 +118,7 @@ class DialogManager:
             query = parsed.get("query", "")
             target_event = None
             if query:
-                found = db_search_fts(query, limit=5)
+                found = hybrid_search_events(query, limit=3)
                 if found:
                     target_event = found[0]
             elif session.get("last_event_id"):
@@ -143,7 +143,7 @@ class DialogManager:
             query = parsed.get("query", "")
             target_event = None
             if query:
-                found = db_search_fts(query, limit=5)
+                found = hybrid_search_events(query, limit=3)
                 if found:
                     target_event = found[0]
             elif session.get("last_event_id"):
@@ -191,19 +191,18 @@ class DialogManager:
 
         if intent == "SEARCH_EVENTS":
             query = parsed.get("query", "")
-            results = db_search_fts(query, limit=10)
-            if not results:
-                filters = EventFilter(query=query)
-                results = db_list_events(filters, limit=10)
+            results = hybrid_search_events(query, limit=10) if query else []
 
             if results:
                 lines = []
                 for r in results[:5]:
                     t_str = f" в {r.time}" if r.time else ""
-                    lines.append(f"• {format_russian_date_spoken(r.date)}{t_str}: {r.title}")
+                    type_label = "Встреча" if r.type == EventType.MEETING else ("Напоминание" if r.type == EventType.REMINDER else "Задача")
+                    lines.append(f"• [{type_label}] {format_russian_date_spoken(r.date)}{t_str}: {r.title}")
                 session["last_event_id"] = results[0].id
-                reply = f"Нашел следующие записи по запросу «{query}»:\n" + "\n".join(lines)
-                voice = f"Нашел {len(results)} записей. Первая: {results[0].title} на {format_russian_date_spoken(results[0].date)}."
+                reply = f"Нашел по запросу «{query}» ({len(results)}):\n" + "\n".join(lines)
+                first = results[0]
+                voice = f"Нашел запись «{first.title}» на {format_russian_date_spoken(first.date)}."
                 return AssistantResponse(
                     reply_text=reply,
                     voice_text=voice,
@@ -228,14 +227,15 @@ class DialogManager:
                 filters = EventFilter(start_date=target_date, end_date=target_date, type=event_type)
                 period_title = f"на {format_russian_date_spoken(target_date)}"
 
-            events = db_list_events(filters, limit=20)
+            events = db_list_events(filters, limit=25)
             if events:
                 lines = []
                 for e in events:
                     t_str = f"{e.time} — " if e.time else ""
                     type_icon = "📅" if e.type == EventType.MEETING else "✅"
                     lines.append(f"{type_icon} {t_str}{e.title}")
-                reply = f"Ваши планы {period_title} ({len(events)}):\n" + "\n".join(lines)
+                type_desc = "встречи " if event_type == EventType.MEETING else ("задачи " if event_type == EventType.TASK else "")
+                reply = f"Ваши {type_desc}планы {period_title} ({len(events)}):\n" + "\n".join(lines)
                 voice = f"У вас {len(events)} событий {period_title}. Первое: {events[0].title}."
                 return AssistantResponse(
                     reply_text=reply,
@@ -244,7 +244,8 @@ class DialogManager:
                     action=AssistantAction(action_type="LIST"),
                 )
             else:
-                reply = f"На этот период ({period_title}) запланированных событий нет. Вы свободны!"
+                type_desc = "встреч" if event_type == EventType.MEETING else ("задач" if event_type == EventType.TASK else "событий")
+                reply = f"На этот период ({period_title}) запланированных {type_desc} нет. Вы свободны!"
                 return AssistantResponse(reply_text=reply, voice_text=reply)
 
         if intent == "CREATE_EVENT":
@@ -292,7 +293,7 @@ class DialogManager:
                     conflict_name = conflicts[0].title
                     reply = (
                         f"Встреча «{new_event.title}» добавлена на {format_russian_date_spoken(new_event.date)} в {new_event.time}. "
-                        f"⚠️ Внимание: в это время уже есть встреча «{conflict_name}»!"
+                        f"Внимание: в это же время уже запланирована встреча «{conflict_name}»."
                     )
                     return AssistantResponse(
                         reply_text=reply,
