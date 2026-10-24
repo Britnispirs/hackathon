@@ -29,28 +29,61 @@ WEEKDAYS_RU = {
 }
 
 
+WORDS_TO_HOURS = {
+    "час": 1, "один": 1,
+    "два": 2,
+    "три": 3,
+    "четыре": 4,
+    "пять": 5,
+    "шесть": 6,
+    "семь": 7,
+    "восемь": 8,
+    "девять": 9, "девть": 9, "девяти": 9,
+    "десять": 10, "десяти": 10,
+    "одиннадцать": 11, "одиннадцати": 11,
+    "двенадцать": 12, "двенадцати": 12,
+    "полдень": 12,
+    "полночь": 0,
+}
+
+
 def parse_russian_time(text: str) -> Optional[str]:
     lower = text.lower()
 
+    # 1. Colon format HH:MM
     match_colon = re.search(r"\b([0-1]?[0-9]|2[0-3]):([0-5][0-9])\b", lower)
     if match_colon:
         hours = int(match_colon.group(1))
         minutes = int(match_colon.group(2))
         return f"{hours:02d}:{minutes:02d}"
 
-    match_words = re.search(
-        r"(?:в|к|на)\s*([0-2]?[0-9])\s*(?:часов|часа|час)?\s*(утра|дня|вечера|ночи)?",
-        lower,
-    )
-    if match_words:
-        hours = int(match_words.group(1))
-        period = match_words.group(2)
-        if period in ["вечера", "дня"] and hours < 12:
-            hours += 12
-        elif period == "ночи" and hours == 12:
-            hours = 0
-        if 0 <= hours <= 23:
-            return f"{hours:02d}:00"
+    words_pat = "|".join(sorted(WORDS_TO_HOURS.keys(), key=len, reverse=True))
+    num_pat = rf"(?:2[0-3]|1[0-9]|0?[0-9]|{words_pat})"
+
+    patterns = [
+        rf"\b(?:в|во|к|на)\s*(?:примерно|около)?\s*(?:часов|часа)?\s*({num_pat})\s*(?:часов|часа|час)?\s*(утра|дня|вечера|ночи)?\b",
+        rf"\b(?:часов|часа)\s+(?:в|во|к|на)?\s*({num_pat})\s*(утра|дня|вечера|ночи)?\b",
+        rf"\b({num_pat})\s*(?:часов|часа|час)\s*(утра|дня|вечера|ночи)?\b",
+    ]
+
+    for pat in patterns:
+        m = re.search(pat, lower)
+        if m:
+            val_str = m.group(1)
+            period = m.group(2) if len(m.groups()) > 1 else None
+            if val_str in WORDS_TO_HOURS:
+                h = WORDS_TO_HOURS[val_str]
+            elif val_str.isdigit():
+                h = int(val_str)
+            else:
+                continue
+
+            if 0 <= h <= 23:
+                if period in ["вечера", "дня"] and h < 12:
+                    h += 12
+                elif period == "ночи" and h == 12:
+                    h = 0
+                return f"{h:02d}:00"
 
     match_rel = re.search(r"через\s+(\d+|два|три|четыре|полчаса|час)\s*(час|часа|часов|минут|минуты)?", lower)
     if match_rel:
@@ -87,9 +120,9 @@ def parse_russian_date(text: str, base_date: Optional[date] = None) -> Optional[
 
     if "послезавтра" in lower:
         return (base_date + timedelta(days=2)).isoformat()
-    if "завтра" in lower:
+    if "завтра" in lower or "завтречко" in lower:
         return (base_date + timedelta(days=1)).isoformat()
-    if "сегодня" in lower:
+    if "сегодня" in lower or "седня" in lower or "щас" in lower or "сейчас" in lower:
         return base_date.isoformat()
 
     if "через" in lower and any(u in lower for u in ["час", "часа", "часов", "минут", "полчаса"]):
@@ -154,29 +187,59 @@ def clean_title(raw_text: str, event_type: EventType, date_str: Optional[str], t
         r"^(пожалуйста\s*,?\s*)",
         r"^(напомни мне\s+)",
         r"^(напомни\s+)",
+        r"^(поставь мне задачу\s+)",
         r"^(поставь задачу\s+)",
-        r"^(добавь задачу\s+)",
-        r"^(создай задачу\s+)",
+        r"^(поставь мне встречу\s+)",
         r"^(поставь встречу\s+)",
+        r"^(поставь мне\s+)",
+        r"^(поставь\s+)",
+        r"^(добавь мне задачу\s+)",
+        r"^(добавь задачу\s+)",
+        r"^(добавь мне встречу\s+)",
         r"^(добавь встречу\s+)",
+        r"^(добавь мне\s+)",
+        r"^(добавь\s+)",
+        r"^(создай мне задачу\s+)",
+        r"^(создай задачу\s+)",
+        r"^(создай мне встречу\s+)",
         r"^(создай встречу\s+)",
+        r"^(создай мне\s+)",
+        r"^(создай\s+)",
+        r"^(запланируй мне встречу\s+)",
         r"^(запланируй встречу\s+)",
+        r"^(запланируй мне\s+)",
+        r"^(запланируй\s+)",
+        r"^(запиши мне\s+)",
+        r"^(запиши\s+)",
+        r"^(организуй мне\s+)",
+        r"^(организуй нам\s+)",
+        r"^(организуй\s+)",
+        r"^(сделай мне\s+)",
+        r"^(сделай\s+)",
         r"^(у меня встреча\s+с\s+)",
         r"^(у меня встреча\s+)",
         r"^(у меня созвон\s+с\s+)",
+        r"^(у меня созвон\s+)",
+        r"^(у меня\s+)",
         r"^(встреча\s+с\s+)",
         r"^(встреча\s+)",
         r"^(нужно\s+)",
         r"^(надо\s+)",
+        r"^(хочу\s+)",
+        r"^(давай\s+)",
     ]
     for pref in prefixes:
         cleaned = re.sub(pref, "", cleaned, flags=re.IGNORECASE)
 
+    words_pat = "|".join(sorted(WORDS_TO_HOURS.keys(), key=len, reverse=True))
+    num_pat = rf"(?:2[0-3]|1[0-9]|0?[0-9]|{words_pat})"
     date_time_phrases = [
-        r"\b(сегодня|завтра|послезавтра)\b",
-        r"\b(до конца недели|на этой неделе|на следующей неделе)\b",
-        r"\bв\s+[0-2]?[0-9]:[0-5][0-9]\b",
-        r"\bв\s+[0-2]?[0-9]\s*(?:часов|часа|час)?\s*(утра|дня|вечера|ночи)?\b",
+        r"\b(сегодня|седня|завтра|завтречко|послезавтра|щас|сейчас)\b",
+        r"\b(до конца недели|на этой неделе|на следующей неделе|в конце недели)\b",
+        r"\b[0-2]?[0-9]:[0-5][0-9]\b",
+        rf"\b(?:в|во|к|на)\s*(?:примерно|около)?\s*(?:часов|часа)?\s*(?:{num_pat})\s*(?:часов|часа|час)?\s*(?:утра|дня|вечера|ночи)?\b",
+        rf"\b(?:часов|часа)\s+(?:в|во|к|на)?\s*(?:{num_pat})\s*(?:утра|дня|вечера|ночи)?\b",
+        rf"\b(?:{num_pat})\s*(?:часов|часа|час)\s*(?:утра|дня|вечера|ночи)?\b",
         r"\bчерез\s+(\d+|два|три|четыре|полчаса|час)\s*(час|часа|часов|минут|минуты)?\b",
         r"\b(в|во)\s+(понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)\b",
     ]
@@ -184,16 +247,23 @@ def clean_title(raw_text: str, event_type: EventType, date_str: Optional[str], t
         cleaned = re.sub(dt_phrase, "", cleaned, flags=re.IGNORECASE)
 
     cleaned = re.sub(r"\bу меня\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bмне\b", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
 
-    if event_type == EventType.MEETING and not any(k in cleaned.lower() for k in ["встреча", "созвон", "планерка", "планёрка", "демо"]):
-        if cleaned.lower().startswith("с ") or cleaned.lower().startswith("со "):
-            cleaned = f"Встреча {cleaned}"
-        elif cleaned:
-            cleaned = f"Встреча: {cleaned}"
+    if event_type == EventType.MEETING:
+        lower_cl = cleaned.lower()
+        if lower_cl.startswith("беседку"):
+            cleaned = "Беседка" + cleaned[7:]
+        elif lower_cl.startswith("беседу"):
+            cleaned = "Беседа" + cleaned[6:]
+        elif not any(k in lower_cl for k in ["встреча", "созвон", "планерка", "планёрка", "демо", "бесед", "поболтать", "поговор", "ланч", "кофе", "обед"]):
+            if lower_cl.startswith("с ") or lower_cl.startswith("со "):
+                cleaned = f"Встреча {cleaned}"
+            elif cleaned:
+                cleaned = f"Встреча: {cleaned}"
 
     if not cleaned:
-        cleaned = raw_text.strip()
+        return ""
     return cleaned[0].upper() + cleaned[1:] if len(cleaned) > 0 else cleaned
 
 
@@ -245,6 +315,17 @@ def clean_search_query(text: str) -> str:
 def parse_user_intent(text: str) -> Dict[str, Any]:
     lower = text.lower().strip()
 
+    # 1. Greetings & Pleasantries
+    if any(re.search(rf"\b{g}\b", lower) for g in ["привет", "здравствуй", "здравствуйте", "салют", "доброе утро", "добрый день", "добрый вечер", "хай", "хеллоу"]):
+        return {"intent": "CHAT_GREETING", "raw_text": text}
+
+    if any(re.search(rf"\b{g}\b", lower) for g in ["спасибо", "благодарю", "от души", "сенкс"]):
+        return {"intent": "CHAT_THANKS", "raw_text": text}
+
+    if any(k in lower for k in ["что ты умеешь", "что можешь", "помощь", "команды", "как пользоваться", "help"]):
+        return {"intent": "HELP", "raw_text": text}
+
+    # 2. Complete event
     if any(k in lower for k in ["отметь выполненной", "отметь задачу выполненной", "выполнил задачу", "заверши задачу", "сделано", "отметь как сделано", "отметь задачу"]):
         query = clean_search_query(text)
         return {
@@ -253,6 +334,7 @@ def parse_user_intent(text: str) -> Dict[str, Any]:
             "raw_text": text,
         }
 
+    # 3. Delete event
     if any(k in lower for k in ["удали", "удалить", "отмени", "отменить", "стереть"]):
         query = clean_search_query(text)
         return {
@@ -261,6 +343,7 @@ def parse_user_intent(text: str) -> Dict[str, Any]:
             "raw_text": text,
         }
 
+    # 4. Reschedule event
     if any(k in lower for k in ["перенеси", "перенести", "сдвинь", "поменяй время", "отложи"]):
         target_date = parse_russian_date(lower)
         target_time = parse_russian_time(lower)
@@ -271,6 +354,7 @@ def parse_user_intent(text: str) -> Dict[str, Any]:
             "raw_text": text,
         }
 
+    # 5. Search events
     if any(k in lower for k in [
         "найди", "найти", "поищи", "когда у меня была", "когда была", "когда-то ставил", "найди ее", "найди задачу", "найди встречу"
     ]):
@@ -281,18 +365,29 @@ def parse_user_intent(text: str) -> Dict[str, Any]:
             "raw_text": text,
         }
 
-    list_markers = [
+    # 6. List events
+    list_keywords = [
         "что у меня", "какие планы", "покажи мои", "какие задачи", "есть ли у меня",
-        "что запланировано", "планы на", "список задач", "расписание"
+        "что запланировано", "планы на", "список задач", "список", "расписание",
+        "покажи", "выведи", "глянь", "посмотри", "какие дела", "какие встречи",
+        "что делать", "что мне делать", "дела на", "задачи на", "встречи на",
+        "что на сегодня", "что на завтра", "мои задачи", "мои встречи", "мои планы",
+        "озвучь задачи", "озвучь планы", "расскажи планы"
     ]
-    if any(marker in lower for marker in list_markers):
+    is_list = any(k in lower for k in list_keywords) or bool(
+        re.search(r"\b(задач[иаеы]|встреч[иае]|дел[ао]|план[ыов]|событи[яй])\b.*\b(на\s+(сегодня|седня|завтра|недел)|покажи|список)\b", lower)
+    ) or bool(
+        re.search(r"\b(покажи|выведи|глянь|посмотри|список)\b.*\b(задач|встреч|дел|план|событи|напоминан|расписани)\b", lower)
+    )
+
+    if is_list:
         target_date = parse_russian_date(lower)
         is_week = any(k in lower for k in ["неделю", "на этой неделе", "на следующую неделю"])
 
         ev_type = None
-        if "встреч" in lower:
+        if "встреч" in lower or "созвон" in lower:
             ev_type = EventType.MEETING
-        elif "задач" in lower:
+        elif "задач" in lower or "дел" in lower:
             ev_type = EventType.TASK
         elif "напоминани" in lower:
             ev_type = EventType.REMINDER
@@ -305,7 +400,12 @@ def parse_user_intent(text: str) -> Dict[str, Any]:
             "raw_text": text,
         }
 
-    is_meeting = any(k in lower for k in ["встреча", "созвон", "планёрка", "планерка", "демо", "встречу"])
+    # 7. Create event vs Incomplete / Unknown
+    is_meeting = any(k in lower for k in [
+        "встреча", "созвон", "планёрка", "планерка", "демо", "встречу", "встретиться",
+        "беседа", "беседу", "беседку", "поболтать", "поговорить", "митинг", "синк",
+        "кофе", "ланч", "обед", "созвониться", "звонок", "1-on-1"
+    ])
     is_reminder = any(k in lower for k in ["напомни", "напоминание", "не забудь"])
 
     if is_meeting:
@@ -320,10 +420,43 @@ def parse_user_intent(text: str) -> Dict[str, Any]:
 
     title = clean_title(text, event_type, extracted_date, extracted_time)
 
+    # Check attendee
     attendee = None
-    attendee_match = re.search(r"(?:с|со|для)\s+([А-Яа-яA-Za-z]+)", text)
-    if attendee_match and attendee_match.group(1).lower() not in ["командой", "партнером", "партнёром"]:
-        attendee = attendee_match.group(1)
+    attendee_match = re.search(
+        r"\b(?:с|со|для)\s+(?:моим|моей|нашим|своим)?\s*(?:братом|братиком|другом|подругой|коллегой|партнером|партнёром|клиентом)?\s*([А-Яа-яA-Za-z]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if attendee_match:
+        cand = attendee_match.group(1).capitalize()
+        if cand.lower() not in ["командой", "партнером", "партнёром", "братом", "братиком", "моим", "моей", "своим", "нашим"]:
+            if cand.endswith("ом") or cand.endswith("ем"):
+                cand = cand[:-2]
+            attendee = cand
+
+    # Check if there is actual substantive content for title
+    meaningful_words = [
+        w for w in re.sub(r"[^\w\s]", "", title.lower()).split()
+        if w not in [
+            "хочу", "надо", "нужно", "можно", "мне", "у", "меня", "пожалуйста",
+            "бы", "ли", "давай", "в", "на", "к", "с", "со", "для", "и", "поставить",
+            "поставь", "добавь", "создай", "запиши", "запланируй", "задачу", "встречу"
+        ]
+    ]
+
+    if not meaningful_words:
+        # Fragment like "хочу в девть часов" or "в 9 часов" without action
+        if extracted_time or extracted_date:
+            return {
+                "intent": "INCOMPLETE",
+                "date": extracted_date,
+                "time": extracted_time,
+                "raw_text": text,
+            }
+        return {
+            "intent": "UNKNOWN",
+            "raw_text": text,
+        }
 
     return {
         "intent": "CREATE_EVENT",

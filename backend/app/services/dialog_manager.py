@@ -65,6 +65,30 @@ class DialogManager:
         session = get_session(session_id)
         text = message.strip()
 
+        if session.get("awaiting_field") == "title":
+            target_time = session.pop("draft_time", None)
+            target_date = session.pop("draft_date", None) or date.today().isoformat()
+            session["awaiting_field"] = None
+
+            parsed = await parse_query_with_llm_or_fallback(text)
+            if not parsed or parsed.get("intent") in ["INCOMPLETE", "UNKNOWN"]:
+                parsed = {
+                    "intent": "CREATE_EVENT",
+                    "type": EventType.TASK,
+                    "title": text.strip()[0].upper() + text.strip()[1:] if text.strip() else text.strip(),
+                    "date": target_date,
+                    "time": target_time,
+                    "attendees": None,
+                }
+            else:
+                parsed["intent"] = "CREATE_EVENT"
+                if target_time and not parsed.get("time"):
+                    parsed["time"] = target_time
+                if target_date and not parsed.get("date"):
+                    parsed["date"] = target_date
+                if not parsed.get("title"):
+                    parsed["title"] = text.strip()[0].upper() + text.strip()[1:] if text.strip() else text.strip()
+
         if session.get("awaiting_field") == "time" and session.get("draft_event"):
             extracted_time = parse_russian_time(text)
             if extracted_time:
@@ -111,8 +135,48 @@ class DialogManager:
                     requires_clarification=True,
                 )
 
-        parsed = await parse_query_with_llm_or_fallback(text)
+        if "parsed" not in locals():
+            parsed = await parse_query_with_llm_or_fallback(text)
         intent = parsed.get("intent", "UNKNOWN")
+
+        if intent in ["CHAT", "CHAT_GREETING"]:
+            reply = "Здравствуйте! Я ваш голосовой ассистент. Могу запланировать встречу, поставить задачу, найти событие или показать список дел. Чем помочь?"
+            return AssistantResponse(reply_text=reply, voice_text=reply)
+
+        if intent == "CHAT_THANKS":
+            reply = "Всегда пожалуйста! Обращайтесь, если нужно что-то запланировать или напомнить."
+            return AssistantResponse(reply_text=reply, voice_text=reply)
+
+        if intent == "HELP":
+            reply = (
+                "Я умею:\n"
+                "• Создавать задачи и встречи («Поставь встречу с Иваном в 15:00»)\n"
+                "• Показывать расписание («Покажи задачи на сегодня»)\n"
+                "• Отмечать выполненными («Отметь задачу отчет»)\n"
+                "• Переносить события («Перенеси на завтра в 11:00»)\n"
+                "• Удалять события («Удали созвон с Иваном»)"
+            )
+            return AssistantResponse(reply_text=reply, voice_text="Я умею управлять задачами, встречами и расписанием. Что хотите сделать?")
+
+        if intent == "INCOMPLETE":
+            target_time = parsed.get("time")
+            target_date = parsed.get("date")
+            session["draft_time"] = target_time
+            session["draft_date"] = target_date
+            session["awaiting_field"] = "title"
+
+            time_phrase = f" в {target_time}" if target_time else ""
+            date_phrase = f" на {format_russian_date_spoken(target_date)}" if target_date else ""
+            reply = f"Вы указали время{time_phrase}{date_phrase}, но не уточнили, какую задачу или встречу запланировать. Что именно нужно сделать?"
+            return AssistantResponse(
+                reply_text=reply,
+                voice_text=reply,
+                requires_clarification=True,
+                action=AssistantAction(
+                    action_type="CLARIFY",
+                    clarification_question=reply,
+                ),
+            )
 
         if intent == "COMPLETE_EVENT":
             query = parsed.get("query", "")
@@ -216,7 +280,17 @@ class DialogManager:
         if intent == "LIST_EVENTS":
             target_date = parsed.get("date", date.today().isoformat())
             is_week = parsed.get("is_week", False)
-            event_type = parsed.get("type")
+            raw_type = parsed.get("type")
+            event_type = None
+            if isinstance(raw_type, str):
+                if raw_type.lower() == "meeting":
+                    event_type = EventType.MEETING
+                elif raw_type.lower() == "reminder":
+                    event_type = EventType.REMINDER
+                elif raw_type.lower() == "task":
+                    event_type = EventType.TASK
+            elif isinstance(raw_type, EventType):
+                event_type = raw_type
 
             if is_week:
                 today = date.today()
@@ -249,11 +323,50 @@ class DialogManager:
                 return AssistantResponse(reply_text=reply, voice_text=reply)
 
         if intent == "CREATE_EVENT":
-            event_type = parsed.get("type", EventType.TASK)
-            title = parsed.get("title", text)
+            raw_type = parsed.get("type")
+            if isinstance(raw_type, str):
+                if raw_type.lower() == "meeting":
+                    event_type = EventType.MEETING
+                elif raw_type.lower() == "reminder":
+                    event_type = EventType.REMINDER
+                else:
+                    event_type = EventType.TASK
+            elif isinstance(raw_type, EventType):
+                event_type = raw_type
+            else:
+                event_type = EventType.TASK
+
+            title = parsed.get("title") or text
             target_date = parsed.get("date") or date.today().isoformat()
             target_time = parsed.get("time")
             attendees = parsed.get("attendees")
+
+            # Validate title has substance
+            meaningful = [
+                w for w in re.sub(r"[^\w\s]", "", title.lower()).split()
+                if w not in [
+                    "хочу", "надо", "нужно", "можно", "мне", "пожалуйста", "в", "на", "к", "с",
+                    "бы", "ли", "давай", "поставить", "поставь", "добавь", "создай", "запиши"
+                ]
+            ]
+            if not meaningful:
+                if target_time or target_date:
+                    session["draft_time"] = target_time
+                    session["draft_date"] = target_date
+                    session["awaiting_field"] = "title"
+                    time_info = f" в {target_time}" if target_time else ""
+                    date_info = f" на {format_russian_date_spoken(target_date)}" if target_date else ""
+                    reply = f"Вы указали время{time_info}{date_info}, но не уточнили, какую задачу или встречу запланировать. Что именно нужно сделать?"
+                    return AssistantResponse(
+                        reply_text=reply,
+                        voice_text=reply,
+                        requires_clarification=True,
+                    )
+                return AssistantResponse(
+                    reply_text="Не совсем понял название задачи или встречи. Что именно нужно запланировать?",
+                    voice_text="Что именно нужно запланировать?",
+                    requires_clarification=True,
+                )
 
             if event_type == EventType.MEETING and not target_time:
                 draft = EventCreate(
