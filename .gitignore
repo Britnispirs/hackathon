@@ -45,3 +45,8 @@ Thumbs.db
 # Node
 node_modules/
 npm-debug.log*
+
+# For me
+project.zip
+*.zip
+THEORY.md
