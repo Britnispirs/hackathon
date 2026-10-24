@@ -2,7 +2,7 @@
 
 Прототип интеллектуального голосового ассистента для управления личным расписанием, встречами, задачами и напоминаниями на естественном русском языке.
 
-- Репозиторий: [https://github.com/Britnispirs/hackathon.git](https://github.com/Britnispirs/hackathon.git)
+- Репозиторий: [https://github.com/Britnispirs/testovoe_gorkycode.git](https://github.com/Britnispirs/testovoe_gorkycode.git)
 ---
 
 ## Основные возможности
